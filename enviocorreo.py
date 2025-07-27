@@ -75,8 +75,8 @@ tabla += f"""
 """
 
 # Datos del correo
-remitente = "admicion@sistecpn.ecosystemasec-ec.com"
-destinatario = "estan.osorio@ecosystememas-ec.com"
+remitente = ""
+destinatario = ""
 asunto = "📞 Reporte de llamadas IVR - " + fecha
 
 msg = MIMEMultipart()
@@ -87,9 +87,9 @@ msg.attach(MIMEText(tabla, 'html'))
 
 # Enviar correo
 try:
-    server = smtplib.SMTP('p14245.use145.mysecurecloudhostp.com', 587)
+    server = smtplib.SMTP('', 587)
     server.starttls()
-    server.login(remitente, 'X*9989045643678gtsdgjgf._a0a56a4')
+    server.login(remitente, '')
     server.sendmail(remitente, destinatario, msg.as_string())
     server.quit()
     print("Correo enviado correctamente.")
