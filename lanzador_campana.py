@@ -1,7 +1,6 @@
 # lanzador_campana.py
 # -*- coding: utf-8 -*-
 import pymysql
-import subprocess  # asegúrate de tenerlo arriba
 from gtts import gTTS
 import os
 import time
@@ -11,11 +10,6 @@ import shutil
 import json
 from multiprocessing import Semaphore
 import re
-
-with open("/var/log/ivr/ejecucion_main.log", "a") as log:
-    import datetime
-    log.write(f"🕒 Lanzado: {datetime.datetime.now()}\n")
-
 # Rutas
 PATH_CONFIG = '/var/www/html/ivr_adminlte/includes/config.json'
 PATH_SOUNDS = "/var/lib/asterisk/sounds/custom/ivr/"
@@ -113,6 +107,16 @@ def lanzar_campana(campana_id, MAX_CANALES, INTENSIDAD, grupo_id):
                 
                 time.sleep(2)
                 log_en_vivo(f"[{grupo_id}] [ID {id_reg}] aca si")   
+            # ruta_audio_absoluta = os.path.join("/var/www/html/ivr_adminlte/", ruta_audio)
+            # semaforo.acquire()
+            # nombre_sanitizado = re.sub(r'[^\w\-]', '_', nombre)
+            # filename = f"mensaje_{id_reg}"
+            # ruta_mp3 = f"{PATH_CALLS_TMP}{filename}.mp3"
+            # ruta_wav = f"{PATH_SOUNDS}{filename}.wav"
+            # ruta_call_tmp = f"{PATH_CALLS_TMP}{filename}.call"
+            # ruta_call_final = f"{PATH_CALLS_FINAL}{filename}.call"
+
+
             try:
                 # Convertir audio_ivr desde bytes a entero si es necesario
                 audio_ivr = int.from_bytes(audio_ivr, 'little') if isinstance(audio_ivr, bytes) else int(audio_ivr)
@@ -143,23 +147,7 @@ def lanzar_campana(campana_id, MAX_CANALES, INTENSIDAD, grupo_id):
                     os.chmod(ruta_mp3, 0o664)
 
                     # Convertir a WAV
-                    #os.system(f"ffmpeg -y -i {ruta_mp3} -ar 8000 -ac 1 -ab 16k -f wav {ruta_wav} >/dev/null 2>&1")
-                    
-                    comando = [
-                        "ffmpeg", "-y",
-                        "-i", ruta_mp3,
-                        "-ar", "8000",
-                        "-ac", "1",
-                        "-ab", "16k",
-                        "-f", "wav", ruta_wav
-                    ]
-
-                    resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                    if resultado.returncode != 0:
-                        log_en_vivo(f"[{nombre}] ❌ ffmpeg falló. STDERR: {resultado.stderr.strip()}")
-                        continue
-
-                    
+                    os.system(f"ffmpeg -y -i {ruta_mp3} -ar 8000 -ac 1 -ab 16k -f wav {ruta_wav} >/dev/null 2>&1")
                     if not os.path.isfile(ruta_wav):
                         log_en_vivo(f"[{nombre}] Error: No se generó WAV desde MP3")
                         continue
@@ -181,21 +169,7 @@ def lanzar_campana(campana_id, MAX_CANALES, INTENSIDAD, grupo_id):
                         log_en_vivo(f"[{nombre}] Error: MP3 no se generó")
                         continue
 
-                    #os.system(f"ffmpeg -y -i {ruta_mp3} -ar 8000 -ac 1 -ab 16k -f wav {ruta_wav} >/dev/null 2>&1")
-                    comando = [
-                        "ffmpeg", "-y",
-                        "-i", ruta_mp3,
-                        "-ar", "8000",
-                        "-ac", "1",
-                        "-ab", "16k",
-                        "-f", "wav", ruta_wav
-                    ]
-
-                    resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                    if resultado.returncode != 0:
-                        log_en_vivo(f"[{nombre}] ❌ ffmpeg falló. STDERR: {resultado.stderr.strip()}")
-                        continue
-                        
+                    os.system(f"ffmpeg -y -i {ruta_mp3} -ar 8000 -ac 1 -ab 16k -f wav {ruta_wav} >/dev/null 2>&1")
                     if not os.path.isfile(ruta_wav):
                         log_en_vivo(f"[{nombre}] Error: No se generó WAV desde gTTS")
                         continue
