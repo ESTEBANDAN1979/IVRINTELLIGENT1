@@ -81,17 +81,6 @@ def lanzar_campana(campana_id, MAX_CANALES, INTENSIDAD, grupo_id):
     semaforo = Semaphore(MAX_CANALES)
 
     try:
-        # query = """
-            # SELECT t.id, t.telefono, t.texto, uidnew, t1.nombre
-            # FROM detalle_campana t
-            # LEFT JOIN campanas t1 ON t.campana_id = t1.id
-            # WHERE t.grupo_id = %s AND t.estado IN ('PENDIENTE','REINTENTAR')
-              # AND reintentos_actuales < %s
-            # ORDER BY t.id ASC
-            # LIMIT %s
-        # """
-        # cursor.execute(query, (grupo_id, INTENSIDAD, MAX_CANALES))
-        # registros = cursor.fetchall()
         cursor.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cursor.execute("CALL obtener_detalle_campana_para_marcar(%s, %s, %s)", (grupo_id, INTENSIDAD, MAX_CANALES))
         registros = cursor.fetchall()
@@ -169,7 +158,7 @@ def lanzar_campana(campana_id, MAX_CANALES, INTENSIDAD, grupo_id):
                         log_en_vivo(f"[{nombre}] Error: MP3 no se generó")
                         continue
 
-                    os.system(f"ffmpeg -y -i {ruta_mp3} -ar 8000 -ac 1 -ab 16k -f wav {ruta_wav} >/dev/null 2>&1")
+                    os.system(f"/usr/local/bin/ffmpeg -y -i {ruta_mp3} -ar 8000 -ac 1 -ab 16k -f wav {ruta_wav} >/dev/null 2>&1")
                     if not os.path.isfile(ruta_wav):
                         log_en_vivo(f"[{nombre}] Error: No se generó WAV desde gTTS")
                         continue
