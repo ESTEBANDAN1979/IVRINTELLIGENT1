@@ -1,19 +1,21 @@
 # lanzador_campana.py
 # -*- coding: utf-8 -*-
 import pymysql
-from gtts import gTTS
 import os
 import time
 import socket
 import pwd
+import subprocess
 import shutil
 import json
 from multiprocessing import Semaphore
 import re
+
 # Rutas
 PATH_CONFIG = '/var/www/html/ivr_adminlte/includes/config.json'
 PATH_SOUNDS = "/var/lib/asterisk/sounds/custom/ivr/"
 PATH_CALLS_TMP = "/tmp/ivr/"
+PATH_CALLS_TMPA = "/tmp/ivr/calls/"
 PATH_CALLS_FINAL = "/var/spool/asterisk/outgoing/"
 LOG_PATH = "/var/www/html/ivr_adminlte/logs/resumen_live.log"
 
@@ -73,8 +75,6 @@ def lanzar_campana(campana_id, MAX_CANALES, INTENSIDAD, grupo_id):
     cursor = conn.cursor()
 
     # Marcar campaña como en ejecución
-    #cursor.execute("UPDATE campanas SET ejecutando = 1 WHERE id = %s", (campana_id,))
-    #conn.commit()
     cursor.callproc("marcar_campana_ejecucion", (campana_id,))
     conn.commit()
 
@@ -84,130 +84,109 @@ def lanzar_campana(campana_id, MAX_CANALES, INTENSIDAD, grupo_id):
         cursor.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cursor.execute("CALL obtener_detalle_campana_para_marcar(%s, %s, %s)", (grupo_id, INTENSIDAD, MAX_CANALES))
         registros = cursor.fetchall()
-        #cursor.callproc("obtener_detalle_campana_para_marcar", (grupo_id, INTENSIDAD, MAX_CANALES))
-        #registros = cursor.fetchall()
         
         for id_reg, telefono, texto, uidnew, nombre, ruta_audio, audio_ivr, grupo_id  in registros:
-            log_en_vivo(f"[{grupo_id}] [ID {id_reg}] aca si")
-            if not texto and not ruta_audio:
-                continue
 
+            # Espera mientras no haya canales disponibles
             while canales_activos() >= MAX_CANALES:
-                
-                time.sleep(2)
-                log_en_vivo(f"[{grupo_id}] [ID {id_reg}] aca si")   
-            # ruta_audio_absoluta = os.path.join("/var/www/html/ivr_adminlte/", ruta_audio)
-            # semaforo.acquire()
-            # nombre_sanitizado = re.sub(r'[^\w\-]', '_', nombre)
-            # filename = f"mensaje_{id_reg}"
-            # ruta_mp3 = f"{PATH_CALLS_TMP}{filename}.mp3"
-            # ruta_wav = f"{PATH_SOUNDS}{filename}.wav"
-            # ruta_call_tmp = f"{PATH_CALLS_TMP}{filename}.call"
-            # ruta_call_final = f"{PATH_CALLS_FINAL}{filename}.call"
+                time.sleep(1)
+                log_en_vivo(f"[{grupo_id}] [ID {id_reg}] Esperando canal libre...")
 
+            # Control de concurrencia
+            with semaforo:
+                if not texto and not ruta_audio:
+                    continue
 
-            try:
-                # Convertir audio_ivr desde bytes a entero si es necesario
-                audio_ivr = int.from_bytes(audio_ivr, 'little') if isinstance(audio_ivr, bytes) else int(audio_ivr)
-                log_en_vivo(f"[{audio_ivr}] [ID {id_reg}] Inicio")
-                log_en_vivo(f"[{grupo_id}] Verificando uso de audio. audio_ivr={audio_ivr}, ruta_audio={ruta_audio}")
+                log_en_vivo(f"[{grupo_id}] [ID {id_reg}] Procesando registro...")
 
-                # Determinar si se debe usar audio pregrabado o texto
-                usar_audio = audio_ivr == 1 and ruta_audio is not None and ruta_audio.strip() != ''
+                try:
+                    # Convertir audio_ivr desde bytes a entero si es necesario
+                    audio_ivr = int.from_bytes(audio_ivr, 'little') if isinstance(audio_ivr, bytes) else int(audio_ivr)
+                    log_en_vivo(f"[{audio_ivr}] [ID {id_reg}] Inicio")
+                    log_en_vivo(f"[{grupo_id}] Verificando uso de audio. audio_ivr={audio_ivr}, ruta_audio={ruta_audio}")
 
-                # Preparar nombres y rutas de archivos
-                nombre_sanitizado = re.sub(r'[^\w\-]', '_', nombre)
-                filename = f"mensaje_{id_reg}"
-                ruta_mp3 = f"{PATH_CALLS_TMP}{filename}.mp3"
-                ruta_wav = f"{PATH_SOUNDS}{filename}.wav"
-                ruta_call_tmp = f"{PATH_CALLS_TMP}{filename}.call"
-                ruta_call_final = f"{PATH_CALLS_FINAL}{filename}.call"
+                    # Determinar si se debe usar audio pregrabado o texto
+                    usar_audio = audio_ivr == 1 and ruta_audio is not None and ruta_audio.strip() != ''
 
-                # ▶️ Lógica si es AUDIO
-                if usar_audio:
-                    ruta_audio_absoluta = os.path.join("/var/www/html/ivr_adminlte/", ruta_audio)
+                    # Preparar nombres y rutas de archivos
+                    nombre_sanitizado = re.sub(r'[^\w\-]', '_', nombre)
+                    filename = f"mensaje_{id_reg}"
+                    ruta_mp3 = f"{PATH_CALLS_TMP}{filename}.mp3"
+                    ruta_wav = f"{PATH_SOUNDS}{filename}.wav"
+                    ruta_call_tmp = f"{PATH_CALLS_TMPA}{filename}.call"
 
-                    if not os.path.isfile(ruta_audio_absoluta):
-                        log_en_vivo(f"[{nombre}] Error: MP3 original no existe: {ruta_audio_absoluta}")
-                        continue
+                    # === Lógica si es AUDIO ===
+                    if usar_audio:
+                        ruta_audio_absoluta = os.path.join("/var/www/html/ivr_adminlte/", ruta_audio)
+                        log_en_vivo(f"Esta es la ruta previa: [{ruta_audio_absoluta}]")
+                        if not os.path.isfile(ruta_audio_absoluta):
+                            log_en_vivo(f"[{nombre}] Error: MP3 original no existe: {ruta_audio_absoluta}")
+                            continue
 
-                    shutil.copy(ruta_audio_absoluta, ruta_mp3)
-                    os.chown(ruta_mp3, uid_asterisk, gid_asterisk)
-                    os.chmod(ruta_mp3, 0o664)
+                        shutil.copy(ruta_audio_absoluta, ruta_mp3)
+                        os.chown(ruta_mp3, uid_asterisk, gid_asterisk)
+                        os.chmod(ruta_mp3, 0o664)
 
-                    # Convertir a WAV
-                    os.system(f"ffmpeg -y -i {ruta_mp3} -ar 8000 -ac 1 -ab 16k -f wav {ruta_wav} >/dev/null 2>&1")
-                    if not os.path.isfile(ruta_wav):
-                        log_en_vivo(f"[{nombre}] Error: No se generó WAV desde MP3")
-                        continue
+                        # Convertir a WAV
+                        os.system(f"ffmpeg -y -i {ruta_mp3} -ar 8000 -ac 1 -ab 16k -f wav {ruta_wav} >/dev/null 2>&1")
+                        if not os.path.isfile(ruta_wav):
+                            log_en_vivo(f"[{nombre}] Error: No se pudo convertir el audio")
+                            continue
+                    
+                        os.chown(ruta_wav, uid_asterisk, gid_asterisk)
+                        os.chmod(ruta_wav, 0o664)
 
-                # ✨ Lógica si es TEXTO
-                else:
-                    if not texto or not texto.strip():
-                        log_en_vivo(f"[{nombre}] Error: Texto vacío, no se puede generar gTTS.")
-                        continue
+                    # === Lógica si es TEXTO ===
+                    else:
+                        if not texto or not texto.strip():
+                            log_en_vivo(f"[{nombre}] Error: Texto vacío, no se puede generar audio.")
+                            continue
+                        
+                        comando = ["pico2wave", "-l", "es-ES", "-w", ruta_wav, texto]
+                        try:
+                            subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=True)
+                            log_en_vivo(f"[{nombre}] ✅ Audio generado")
+                        except subprocess.CalledProcessError as e:
+                            log_en_vivo(f"[{nombre}] ❌ Error al generar Audio. STDERR: {e.stderr.strip()}")
+                            continue
 
-                    try:
-                        tts = gTTS(text=texto.strip(), lang='es')
-                        tts.save(ruta_mp3)
-                    except Exception as e:
-                        log_en_vivo(f"[{nombre}] Error al generar MP3 con gTTS: {e}")
-                        continue
+                        if not os.path.exists(ruta_wav):
+                            log_en_vivo(f"[{nombre}] Error: WAV no se generó el Audio")
+                            continue
 
-                    if not os.path.exists(ruta_mp3):
-                        log_en_vivo(f"[{nombre}] Error: MP3 no se generó")
-                        continue
+                        os.chown(ruta_wav, uid_asterisk, gid_asterisk)
+                        os.chmod(ruta_wav, 0o664)
 
-                    os.system(f"/usr/local/bin/ffmpeg -y -i {ruta_mp3} -ar 8000 -ac 1 -ab 16k -f wav {ruta_wav} >/dev/null 2>&1")
-                    if not os.path.isfile(ruta_wav):
-                        log_en_vivo(f"[{nombre}] Error: No se generó WAV desde gTTS")
-                        continue
+                    # Crear el archivo .call
+                    with open(ruta_call_tmp, 'w') as f:
+                        f.write(f'Channel: Local/{telefono}@salida-tts\n')
+                        f.write(f'Set: numero_destino={telefono}\n')
+                        f.write('MaxRetries: 1\n')
+                        f.write('RetryTime: 60\n')
+                        f.write('WaitTime: 30\n')
+                        f.write('Context: salida-tts\n')
+                        f.write('Extension: s\n')
+                        f.write('Priority: 1\n')
+                        f.write(f'CallerID: IVR-{uidnew}\n')
+                        f.write(f'Setvar: audiofile={filename}\n')
+                        f.write(f'Setvar: userfield=IVR-{uidnew}\n')
 
-                    os.remove(ruta_mp3)
+                    os.chown(ruta_call_tmp, uid_asterisk, gid_asterisk)
+                    os.chmod(ruta_call_tmp, 0o664)
+                    
+                    log_en_vivo(f"[📞 {nombre}] .call preparado en {ruta_call_tmp}.")
 
+                    # Marcar detalle como ENVIADO
+                    cursor.callproc("marcar_detalle_enviado", (id_reg,))
+                    conn.commit()
 
-                os.chown(ruta_wav, uid_asterisk, gid_asterisk)
-                os.chmod(ruta_wav, 0o664)
-
-                
-
-                with open(ruta_call_tmp, 'w') as f:
-                    f.write(f'Channel: Local/{telefono}@from-internal\n')
-                    f.write(f'Set: numero_destino={telefono}\n')
-                    f.write('MaxRetries: 1\n')
-                    f.write('RetryTime: 60\n')
-                    f.write('WaitTime: 30\n')
-                    f.write('Context: salida-tts\n')
-                    f.write('Extension: s\n')
-                    f.write('Priority: 1\n')
-                    f.write(f'CallerID: IVR-{uidnew}\n')
-                    f.write(f'Set: audiofile={filename}\n')
-                    f.write(f'Set: userfield=IVR-{uidnew}\n')
-
-                os.chown(ruta_call_tmp, uid_asterisk, gid_asterisk)
-                os.chmod(ruta_call_tmp, 0o664)
-                time.sleep(5)
-                shutil.move(ruta_call_tmp, ruta_call_final)
-
-                # cursor.execute("""
-                    # UPDATE detalle_campana
-                    # SET estado='ENVIADO', reintentos_actuales = reintentos_actuales + 1
-                    # WHERE id=%s
-                # """, (id_reg,))
-                # conn.commit()
-                
-                cursor.callproc("marcar_detalle_enviado", (id_reg,))
-                conn.commit()
-
-                log_en_vivo(f"[{nombre}] Llamada programada para el número {telefono}")
-            except Exception as e:
-                log_en_vivo(f"[{nombre}] final Error: {e}")
-            finally:
-                semaforo.release()
+                    log_en_vivo(f"[{nombre}] Llamada programada para el número {telefono}")
+                except Exception as e:
+                    log_en_vivo(f"[{nombre}] Error final: {e}")
+                finally:
+                    semaforo.release()
 
     finally:
-        #cursor.execute("UPDATE campanas SET ejecutando = 0 WHERE id = %s", (campana_id,))
-        #conn.commit()
         cursor.callproc("liberar_campana", (grupo_id,))
         conn.commit()
         cursor.close()
